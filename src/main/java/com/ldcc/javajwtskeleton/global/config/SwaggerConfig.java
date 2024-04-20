@@ -13,6 +13,7 @@ import java.util.Arrays;
 
 /*
 참고 사이트: https://wonsjung.tistory.com/584
+접속 링크: http://localhost:8080/swagger-ui/index.html
  */
 
 @OpenAPIDefinition(
