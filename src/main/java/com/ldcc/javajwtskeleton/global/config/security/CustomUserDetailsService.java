@@ -1,4 +1,4 @@
-package com.ldcc.javajwtskeleton.global.config.security.auth;
+package com.ldcc.javajwtskeleton.global.config.security;
 
 import com.ldcc.javajwtskeleton.domain.member.entity.Member;
 import com.ldcc.javajwtskeleton.domain.member.repository.MemberRepository;

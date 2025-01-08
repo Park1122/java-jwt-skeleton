@@ -4,15 +4,13 @@ import jakarta.persistence.*;
 import lombok.*;
 
 @Entity
-@Table
+@Table(name = "member")
 @Getter
-@Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@Builder
 public class Member {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
     @Column(name = "member_id")
     private String memberId;
 
@@ -25,17 +23,8 @@ public class Member {
     @Column(name = "member_email")
     private String email;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "member_role")
-    private MemberRoleType role;
-
-    @Builder
-    public Member(String memberId, String name, String password, String email, MemberRoleType role) {
-        this.memberId = memberId;
-        this.name = name;
-        this.password = password;
-        this.email = email;
-        this.role = role;
-    }
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "role_id")
+    private Role role;
 
 }

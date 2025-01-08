@@ -1,22 +1,23 @@
 package com.ldcc.javajwtskeleton.global.config.security.jwt;
 
-import com.ldcc.javajwtskeleton.domain.member.dto.JwtToken;
+import com.ldcc.javajwtskeleton.domain.member.dto.Token;
+import com.ldcc.javajwtskeleton.domain.member.entity.Member;
+import com.ldcc.javajwtskeleton.domain.member.repository.MemberRepository;
+import com.ldcc.javajwtskeleton.domain.member.dto.auth.CustomUserDetails;
+import com.ldcc.javajwtskeleton.global.exceptions.CustomAutenticationException;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.security.Key;
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.Date;
 import java.util.stream.Collectors;
 
@@ -26,84 +27,97 @@ public class JwtTokenProvider {
 
     private final Key key;
     private final long expireTime;
+    private final long refreshExpireTime;
+    private final MemberRepository memberRepository;
 
-    public JwtTokenProvider(@Value("${jwt.secret_key}") String secretKey, @Value("${jwt.expire_time}") long expireTime) {
+    public JwtTokenProvider(@Value("${jwt.secret_key}") String secretKey
+            , @Value("${jwt.expire_time}") long expireTime
+            , @Value("${jwt.refresh_expire_time}") long refreshExpireTime,
+                            MemberRepository memberRepository) {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         this.key = Keys.hmacShaKeyFor(keyBytes);
         this.expireTime = expireTime;
+        this.refreshExpireTime = refreshExpireTime;
+        this.memberRepository = memberRepository;
     }
 
-    public JwtToken createToken(Authentication authentication) {
+    public Token createToken(Authentication authentication) {
         String authorities = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.joining(","));
 
-        long now = new Date().getTime();
-
         // access token 생성
-        Date accessTokenExpire = new Date(now + this.expireTime);
-        String accessToken = Jwts.builder()
-                .setSubject(authentication.getName())
-                .claim("auth", authorities)
-                .setExpiration(accessTokenExpire)
-                .signWith(this.key, SignatureAlgorithm.HS256)
-                .compact();
+        String accessToken = this.createAccessToken(authentication, authorities);
 
         // refresh token 생성
-        String refreshToken = Jwts.builder()
-                .setExpiration(new Date(now + this.expireTime))
-                .signWith(key, SignatureAlgorithm.HS256)
-                .compact();
+        String refreshToken = this.createRefreshToken();
 
-        return JwtToken.builder()
+        return Token.builder()
                 .grantType("Bearer")
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .build();
     }
 
-    public Authentication getAuthentication(String accessToken) {
-        Claims claims = parseClaims(accessToken);
-        if(claims.get("auth") == null) {
-            throw new RuntimeException("권한 정보가 없는 토큰입니다.");
-        }
+    public String createAccessToken(Authentication authentication, String authorities) {
+        Date accessTokenExpire = new Date(new Date().getTime() + this.expireTime);
 
-        // 클레임에서 권한 정보 가져오기
-        Collection<? extends GrantedAuthority> authorities = Arrays.stream(claims.get("auth").toString().split(","))
-                .map(SimpleGrantedAuthority::new)
-                .collect(Collectors.toList());
-
-        // UserDetails 객체를 만들어서 Authentication return
-        // UserDetails: interface, User: UserDetails를 구현한 class
-        UserDetails principal = new User(claims.getSubject(), "", authorities);
-        return new UsernamePasswordAuthenticationToken(principal, "", authorities);
+        return Jwts.builder()
+                .setSubject(authentication.getName())
+                .claim("auth", authorities)
+                .setExpiration(accessTokenExpire)
+                .signWith(this.key, SignatureAlgorithm.HS256)
+                .compact();
     }
 
-    private Claims parseClaims(String accessToken) {
-        try {
-            return Jwts.parserBuilder().setSigningKey(this.key).build().parseClaimsJws(accessToken).getBody();
-        } catch (ExpiredJwtException e) {
-            return e.getClaims();
+    public String createRefreshToken() {
+        Date refreshTokenExpire = new Date(new Date().getTime() + this.refreshExpireTime);
+
+        return Jwts.builder()
+                .setExpiration(refreshTokenExpire)
+                .signWith(this.key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public Authentication getAuthentication(String accessToken) {
+        Claims claims = validateToken(accessToken);
+        if(claims.get("auth") == null) {
+            throw new CustomAutenticationException("권한 정보가 없는 토큰입니다.");
         }
+
+        Member member = memberRepository.findByEmail(claims.getSubject()).orElseThrow(() -> new EntityNotFoundException("존재하지 않는 사용자 입니다."));
+        CustomUserDetails userDetails = new CustomUserDetails(member);
+        return new UsernamePasswordAuthenticationToken(userDetails, "", userDetails.getAuthorities());
+    }
+
+    public String getNameByToken(String token) {
+        Claims claims = this.validateToken(token);
+        return claims.getSubject();
     }
 
     // 토큰 정보 검증
-    public boolean validateToken(String token) {
+    public Claims validateToken(String token) {
         try {
-            Jwts.parserBuilder()
+            return Jwts.parserBuilder()
                     .setSigningKey(this.key)
                     .build()
-                    .parseClaimsJws(token);
-            return true;
-        } catch (SecurityException | MalformedJwtException e) {
-            log.info("Invalid JWT Token", e);
+                    .parseClaimsJws(token)
+                    .getBody();
+        } catch (SecurityException | MalformedJwtException |io.jsonwebtoken.security.SignatureException e) {
+            throw new CustomAutenticationException("토큰 값이 잘못되었습니다.", e);
         } catch (ExpiredJwtException e) {
-            log.info("Expired JWT Token", e);
+            throw new CustomAutenticationException("토큰 값이 만료되었습니다.", e);
         } catch (UnsupportedJwtException e) {
-            log.info("Unsupported JWT Token", e);
+            throw new CustomAutenticationException("지원하지 않는 Jwt 입니다.", e);
         } catch (IllegalArgumentException e) {
-            log.info("JWT claims string is empty.", e);
+            throw new CustomAutenticationException("내용이 존재하지 않습니다.", e);
         }
-        return false;
+    }
+
+    public String resolveToken(String token) {
+        if(!StringUtils.hasText(token) || !token.startsWith("Bearer ")) {
+            throw new IllegalArgumentException("잘못된 요청입니다.");
+        }
+        return token.substring(7);
     }
 }

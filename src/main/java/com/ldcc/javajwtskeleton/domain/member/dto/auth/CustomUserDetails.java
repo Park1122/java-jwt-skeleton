@@ -1,27 +1,27 @@
-package com.ldcc.javajwtskeleton.global.config.security.auth;
+package com.ldcc.javajwtskeleton.domain.member.dto.auth;
 
 import com.ldcc.javajwtskeleton.domain.member.entity.Member;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
-import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
-@NoArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
+@AllArgsConstructor
+@Getter
 public class CustomUserDetails implements UserDetails {
 
     private Member member;
 
-    public CustomUserDetails(Member member) {
-        this.member = member;
-    }
-
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        Collection<GrantedAuthority> authorities = new ArrayList<>();
-        authorities.add(() -> member.getRole().toString());
-        return authorities;
+        return List.of(new SimpleGrantedAuthority(this.member.getRole().getRoleType().name()));
     }
 
     @Override
